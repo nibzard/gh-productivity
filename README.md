@@ -2,6 +2,8 @@
 
 GitHub productivity analysis tool with AI collaboration detection.
 
+![Activity Heatmap](docs/images/activity_heatmap.png)
+
 ## Features
 
 - **Activity Analysis**: Track commits, PRs, and code changes across all repos
@@ -9,6 +11,20 @@ GitHub productivity analysis tool with AI collaboration detection.
 - **Visualizations**: Generate interactive HTML charts with Plotly
 - **Multi-language**: Analyze projects in any programming language
 - **2025 Ready**: Pre-configured for year-based analysis
+
+## Visualizations
+
+![Commit Frequency](docs/images/commit_frequency.png)
+
+### Language Breakdown
+
+![Language Breakdown](docs/images/language_breakdown.png)
+
+### AI Collaboration Analysis
+
+![AI vs Solo](docs/images/ai_vs_solo.png)
+![AI Agents](docs/images/ai_agents.png)
+![AI by Repo](docs/images/ai_by_repo.png)
 
 ## AI Detection Patterns
 
@@ -29,7 +45,7 @@ git clone https://github.com/nibzard/gh-productivity.git
 cd gh-productivity
 
 # Install dependencies
-pip install click pandas numpy requests matplotlib plotly pyarrow python-dateutil tqdm rich
+pip install click pandas numpy requests matplotlib plotly pyarrow python-dateutil tqdm rich kaleido
 
 # Or install the package
 pip install -e .
