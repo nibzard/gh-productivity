@@ -121,6 +121,7 @@ def collect_repos(
     year: int,
     output_dir: Path,
     author: str | None = None,
+    exclude_forks: bool = True,
 ) -> dict:
     """
     Collect data for all repos.
@@ -128,19 +129,22 @@ def collect_repos(
     Args:
         repos_json: Path to repos.json file
         year: Year to analyze
-        output_dir: Directory to save raw data
+        output_dir: Directory to save raw data (year-specific subdir created)
         author: Filter by author email/username
+        exclude_forks: Skip forked repos
 
     Returns:
         Summary dict
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Create year-specific output directory
+    year_output_dir = output_dir / str(year)
+    year_output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(repos_json) as f:
         repos = json.load(f)
 
     since = f"{year}-01-01T00:00:00Z"
-    summary = {"repos": len(repos), "with_commits": 0, "total_commits": 0}
+    summary = {"year": year, "repos": len(repos), "repos_analyzed": 0, "forks_skipped": 0, "with_commits": 0, "total_commits": 0}
 
     with Progress(
         SpinnerColumn(),
@@ -156,6 +160,13 @@ def collect_repos(
             owner = repo["owner"]["login"]
             name = repo["name"]
 
+            # Skip forks if exclude_forks is True
+            if exclude_forks and repo.get("fork", False):
+                summary["forks_skipped"] += 1
+                progress.update(task, advance=1)
+                continue
+
+            summary["repos_analyzed"] += 1
             progress.update(task, description=f"[cyan]Fetching {owner}/{name}...")
 
             data = {
@@ -184,7 +195,7 @@ def collect_repos(
 
             # Save to file
             safe_name = f"{owner}_{name}".replace("/", "_")
-            output_file = output_dir / f"{safe_name}.json"
+            output_file = year_output_dir / f"{safe_name}.json"
 
             with open(output_file, "w") as f:
                 json.dump(data, f, indent=2)
@@ -192,10 +203,12 @@ def collect_repos(
             progress.update(task, advance=1)
 
     # Save summary
-    with open(output_dir / "summary.json", "w") as f:
+    with open(year_output_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
-    console.print(f"\n[green]✓[/green] Collected data for {summary['repos']} repos")
+    console.print(f"\n[green]✓[/green] Collected data for {summary['repos_analyzed']} repos ({year})")
+    if exclude_forks and summary["forks_skipped"] > 0:
+        console.print(f"  Forks skipped: {summary['forks_skipped']}")
     console.print(f"  Repos with commits: {summary['with_commits']}")
     console.print(f"  Total commits: {summary['total_commits']}")
 

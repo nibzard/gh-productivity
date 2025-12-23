@@ -84,13 +84,25 @@ def process_prs(prs: list[dict]) -> pd.DataFrame:
 def aggregate_data(
     raw_dir: Path,
     output_dir: Path,
+    exclude_forks: bool = True,
+    year: int | None = None,
 ) -> dict[str, pd.DataFrame]:
     """
     Aggregate all collected data into DataFrames.
 
+    Args:
+        raw_dir: Directory with raw JSON files (can be year-specific like data/raw/2025)
+        output_dir: Directory to save parquet files (year-specific subdir created if year specified)
+        exclude_forks: Filter out forked repos from analysis
+        year: Optional year for creating year-specific output directory
+
     Returns:
-        Dict with DataFrames: commits, prs, repos, languages
+        Dict with DataFrames: commits, prs, repos
     """
+    # Create year-specific output directory if year provided
+    if year:
+        output_dir = output_dir / str(year)
+
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_data = load_raw_data(raw_dir)
 
@@ -101,6 +113,9 @@ def aggregate_data(
     repo_stats = []
 
     for repo_data in raw_data:
+        # Skip forks if requested (for safety, even if collect already filtered)
+        if exclude_forks and repo_data.get("fork", False):
+            continue
         owner = repo_data["owner"]
         name = repo_data["name"]
 

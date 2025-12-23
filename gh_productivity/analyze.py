@@ -21,6 +21,10 @@ class ProductivityMetrics:
     net_lines: int = 0
     files_touched: int = 0
 
+    # LOC (new)
+    total_loc: int = 0
+    code_loc: int = 0
+
     # Repos
     repos_active: int = 0
     repos_created: int = 0
@@ -45,14 +49,22 @@ class ProductivityMetrics:
     primary_language: str = "N/A"
     language_diversity: int = 0
 
+    # Year (new)
+    year: int = 2025
+
+    # YoY Growth (new)
+    yoy_commit_growth: float = 0.0
+    yoy_loc_growth: float = 0.0
+
     def print_summary(self):
         """Print metrics summary as table."""
-        table = Table(title="2025 Productivity Summary")
+        table = Table(title=f"{self.year} Productivity Summary")
 
         table.add_column("Metric", style="cyan")
         table.add_column("Value", style="green")
 
         table.add_row("Total Commits", str(self.total_commits))
+        table.add_row("Code Lines (LOC)", f"{self.code_loc:,}" if self.code_loc > 0 else "N/A")
         table.add_row("Net Lines Written", str(self.net_lines))
         table.add_row("Active Repos", str(self.repos_active))
         table.add_row("Coding Days", str(self.coding_days))
@@ -70,6 +82,7 @@ def calculate_metrics(
     prs_df: pd.DataFrame,
     repos_df: pd.DataFrame,
     year: int = 2025,
+    loc_df: pd.DataFrame | None = None,
 ) -> ProductivityMetrics:
     """
     Calculate all productivity metrics.
@@ -79,11 +92,12 @@ def calculate_metrics(
         prs_df: Pull requests DataFrame
         repos_df: Repos DataFrame
         year: Year to analyze
+        loc_df: Optional LOC DataFrame
 
     Returns:
         ProductivityMetrics object
     """
-    metrics = ProductivityMetrics()
+    metrics = ProductivityMetrics(year=year)
 
     if commits_df.empty:
         console.print("[yellow]No commits found for analysis[/yellow]")
@@ -152,6 +166,11 @@ def calculate_metrics(
             metrics.primary_language = lang_counts.index[0]
             metrics.language_diversity = len(lang_counts)
 
+    # LOC metrics (from loc_df if available)
+    if loc_df is not None and not loc_df.empty:
+        metrics.total_loc = int(loc_df["total_loc"].sum())
+        metrics.code_loc = int(loc_df["code_loc"].sum())
+
     return metrics
 
 
@@ -193,3 +212,47 @@ def calculate_repo_productivity(repos_df: pd.DataFrame) -> pd.DataFrame:
     ranked = ranked.sort_values("commits_2025", ascending=False)
 
     return ranked
+
+
+def calculate_yoy_growth(
+    current_metrics: ProductivityMetrics,
+    previous_metrics: ProductivityMetrics,
+) -> dict:
+    """Calculate year-over-year growth rates.
+
+    Args:
+        current_metrics: Current year metrics
+        previous_metrics: Previous year metrics
+
+    Returns:
+        Dict with growth rates
+    """
+    growth = {}
+
+    # Commits growth
+    if previous_metrics.total_commits > 0:
+        growth["commits"] = (
+            (current_metrics.total_commits - previous_metrics.total_commits)
+            / previous_metrics.total_commits
+        )
+    else:
+        growth["commits"] = 0.0
+
+    # LOC growth
+    if previous_metrics.code_loc > 0:
+        growth["loc"] = (
+            (current_metrics.code_loc - previous_metrics.code_loc)
+            / previous_metrics.code_loc
+        )
+    else:
+        growth["loc"] = 0.0
+
+    # PRs growth
+    prev_prs = previous_metrics.prs_merged if previous_metrics.prs_merged else 0
+    curr_prs = current_metrics.prs_merged if current_metrics.prs_merged else 0
+    if prev_prs > 0:
+        growth["prs"] = (curr_prs - prev_prs) / prev_prs
+    else:
+        growth["prs"] = 0.0
+
+    return growth

@@ -1,5 +1,6 @@
 """Generate visualizations."""
 
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -238,13 +239,240 @@ def plot_repo_breakdown(repos_df: pd.DataFrame, output_path: Path):
     console.print(f"[green]✓[/green] Saved repo breakdown")
 
 
+def plot_multi_year_trend(
+    yearly_metrics: dict,
+    output_path: Path,
+):
+    """Plot multi-year commits and LOC trends.
+
+    Args:
+        yearly_metrics: Dict mapping year -> ProductivityMetrics
+        output_path: Directory to save plot
+    """
+    if not yearly_metrics:
+        return
+
+    years = sorted(yearly_metrics.keys())
+    commits = [yearly_metrics[y].total_commits for y in years]
+    loc = [yearly_metrics[y].code_loc for y in years]
+
+    fig = go.Figure()
+
+    # Commits line
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=commits,
+        mode="lines+markers",
+        name="Commits",
+        line=dict(color="#00d4aa", width=3),
+        marker=dict(size=8),
+    ))
+
+    # LOC line (on secondary y-axis)
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=loc,
+        mode="lines+markers",
+        name="Code Lines (LOC)",
+        yaxis="y2",
+        line=dict(color="#ff6b6b", width=3),
+        marker=dict(size=8),
+    ))
+
+    fig.update_layout(
+        title="Multi-Year Productivity Trend",
+        xaxis_title="Year",
+        yaxis_title="Commits",
+        yaxis2=dict(
+            title="Code Lines (LOC)",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+        ),
+        template="plotly_dark",
+        height=450,
+        hovermode="x unified",
+    )
+
+    fig.write_html(str(output_path / "multi_year_trend.html"))
+    console.print(f"[green]✓[/green] Saved multi-year trend")
+
+
+def plot_benchmark_comparison(
+    metrics,
+    benchmark,
+    output_path: Path,
+):
+    """Plot user vs average developer benchmark.
+
+    Args:
+        metrics: ProductivityMetrics
+        benchmark: BenchmarkResult
+        output_path: Directory to save plot
+    """
+    categories = ["LOC (lines)", "Commits"]
+    user_vals = [benchmark.user_loc, benchmark.user_commits]
+    avg_vals = [AVERAGE_DEVELOPER["loc_per_year"], AVERAGE_DEVELOPER["commits_per_year"]]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            name="You",
+            x=categories,
+            y=user_vals,
+            marker=dict(color="#00d4aa"),
+        ),
+        go.Bar(
+            name="Average Developer",
+            x=categories,
+            y=avg_vals,
+            marker=dict(color="#ff6b6b"),
+        ),
+    ])
+
+    fig.update_layout(
+        title=f"You vs Average Developer ({metrics.year})",
+        yaxis_title="Count",
+        template="plotly_dark",
+        height=400,
+        barmode="group",
+    )
+
+    fig.write_html(str(output_path / "benchmark_comparison.html"))
+    console.print(f"[green]✓[/green] Saved benchmark comparison")
+
+
+def plot_loc_by_language_trend(
+    yearly_loc_data: dict,
+    output_path: Path,
+):
+    """Plot LOC by language over time (stacked area).
+
+    Args:
+        yearly_loc_data: Dict mapping year -> LOC DataFrame
+        output_path: Directory to save plot
+    """
+    if not yearly_loc_data:
+        return
+
+    years = sorted(yearly_loc_data.keys())
+
+    # Aggregate languages by year
+    lang_by_year = {}
+    for year in years:
+        loc_df = yearly_loc_data[year]
+        if loc_df.empty:
+            continue
+
+        for _, row in loc_df[loc_df["scanned"]].iterrows():
+            by_lang = json.loads(row["by_language"])
+            for lang, loc in by_lang.items():
+                lang_by_year[lang] = lang_by_year.get(lang, {})
+                lang_by_year[lang][year] = lang_by_year[lang].get(year, 0) + loc
+
+    if not lang_by_year:
+        return
+
+    # Create stacked area chart
+    fig = go.Figure()
+
+    for lang, year_data in lang_by_year.items():
+        year_values = [year_data.get(y, 0) for y in years]
+        fig.add_trace(go.Scatter(
+            x=years,
+            y=year_values,
+            mode="lines",
+            stackgroup="one",
+            name=lang,
+            fill="tozeroy",
+        ))
+
+    fig.update_layout(
+        title="Code Lines by Language Over Time",
+        xaxis_title="Year",
+        yaxis_title="Code Lines",
+        template="plotly_dark",
+        height=500,
+        hovermode="x unified",
+    )
+
+    fig.write_html(str(output_path / "loc_by_language_trend.html"))
+    console.print(f"[green]✓[/green] Saved LOC by language trend")
+
+
+def plot_percentile_radar(
+    benchmark,
+    output_path: Path,
+):
+    """Plot percentile rankings as radar chart.
+
+    Args:
+        benchmark: BenchmarkResult
+        output_path: Directory to save plot
+    """
+    # Calculate percentile scores (0-1 scale, capped at 1)
+    loc_pct = min(benchmark.loc_vs_avg_pct, 3.0) / 3.0
+    commits_pct = min(benchmark.commits_vs_avg_pct, 3.0) / 3.0
+
+    # Tier scores (Below Average=0.25, Average=0.5, Top 10%=0.75, Top 1%=1.0)
+    tier_scores = {
+        "Below Average": 0.25,
+        "Average": 0.5,
+        "Top 10%": 0.75,
+        "Top 1%": 1.0,
+    }
+
+    loc_tier_score = tier_scores.get(benchmark.loc_tier, 0.5)
+    commits_tier_score = tier_scores.get(benchmark.commits_tier, 0.5)
+    overall_tier_score = tier_scores.get(benchmark.overall_tier, 0.5)
+
+    categories = ["LOC", "Commits", "Overall"]
+
+    fig = go.Figure(data=go.Scatterpolar(
+        r=[loc_pct, commits_pct, overall_tier_score],
+        theta=categories,
+        fill="toself",
+        marker=dict(color="#00d4aa", size=0.1),
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+            )),
+        title="Percentile Rankings (Normalized)",
+        template="plotly_dark",
+        height=400,
+    )
+
+    fig.write_html(str(output_path / "percentile_radar.html"))
+    console.print(f"[green]✓[/green] Saved percentile radar")
+
+
+# Import for benchmark comparison
+from .benchmarks import AVERAGE_DEVELOPER
+
+
 def generate_all_visualizations(
     commits_df: pd.DataFrame,
     prs_df: pd.DataFrame,
     repos_df: pd.DataFrame,
     output_dir: Path,
+    yearly_metrics: dict | None = None,
+    benchmark = None,
+    yearly_loc_data: dict | None = None,
 ):
-    """Generate all visualizations."""
+    """Generate all visualizations.
+
+    Args:
+        commits_df: Commits DataFrame
+        prs_df: Pull requests DataFrame
+        repos_df: Repos DataFrame
+        output_dir: Directory to save plots
+        yearly_metrics: Optional dict mapping year -> ProductivityMetrics
+        benchmark: Optional BenchmarkResult for comparison charts
+        yearly_loc_data: Optional dict mapping year -> LOC DataFrame
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     console.print("\n[cyan]Generating visualizations...[/cyan]")
@@ -256,5 +484,21 @@ def generate_all_visualizations(
     plot_ai_by_repo(repos_df, output_dir)
     plot_ai_agent_distribution(commits_df, output_dir)
     plot_repo_breakdown(repos_df, output_dir)
+
+    # New visualizations (conditional)
+    if yearly_metrics:
+        plot_multi_year_trend(yearly_metrics, output_dir)
+
+    if benchmark and benchmark.user_loc > 0:
+        from .analyze import calculate_metrics
+        # Create a metrics object for the plot
+        metrics = type('Metrics', (), {
+            'year': list(yearly_metrics.keys())[0] if yearly_metrics else 2025
+        })()
+        plot_benchmark_comparison(metrics, benchmark, output_dir)
+        plot_percentile_radar(benchmark, output_dir)
+
+    if yearly_loc_data:
+        plot_loc_by_language_trend(yearly_loc_data, output_dir)
 
     console.print(f"\n[green]✓ All visualizations saved to {output_dir}[/green]")

@@ -22,11 +22,12 @@ def main():
 
 
 @main.command()
-@click.option("--year", default=2025, help="Year to analyze")
+@click.option("--years", default="2025", help="Year(s) to analyze (comma-separated)")
 @click.option("--repos", default="repos.json", help="Path to repos.json file")
 @click.option("--output", default="data/raw", help="Output directory for raw data")
 @click.option("--author", help="Filter by author (email or username)")
-def collect(year: int, repos: str, output: str, author: str | None):
+@click.option("--include-forks", is_flag=True, help="Include forked repos in analysis")
+def collect(years: str, repos: str, output: str, author: str | None, include_forks: bool):
     """Collect data from GitHub API."""
     repos_path = Path(repos)
     output_path = Path(output)
@@ -35,15 +36,19 @@ def collect(year: int, repos: str, output: str, author: str | None):
         console.print(f"[red]Error: {repos} not found[/red]")
         return
 
-    console.print(f"\n[cyan]Collecting data for {year}...[/cyan]\n")
+    year_list = [int(y.strip()) for y in years.split(",")]
+    console.print(f"\n[cyan]Collecting data for years: {year_list}[/cyan]\n")
 
-    collect_repos(repos_path, year, output_path, author)
+    for year in year_list:
+        collect_repos(repos_path, year, output_path, author, exclude_forks=not include_forks)
 
 
 @main.command()
 @click.option("--data", default="data/raw", help="Raw data directory")
 @click.option("--output", default="data/processed", help="Output directory")
-def process(data: str, output: str):
+@click.option("--years", default="2025", help="Year(s) to process (comma-separated)")
+@click.option("--include-forks", is_flag=True, help="Include forked repos in analysis")
+def process(data: str, output: str, years: str, include_forks: bool):
     """Process and aggregate collected data."""
     from . import process as proc_module
 
@@ -54,108 +59,200 @@ def process(data: str, output: str):
         console.print(f"[red]Error: {data} not found[/red]")
         return
 
-    console.print(f"\n[cyan]Processing data...[/cyan]\n")
+    year_list = [int(y.strip()) for y in years.split(",")]
+    console.print(f"\n[cyan]Processing data for years: {year_list}...[/cyan]\n")
 
-    proc_module.aggregate_data(data_path, output_path)
+    for year in year_list:
+        year_data_path = data_path / str(year)
+        if year_data_path.exists():
+            proc_module.aggregate_data(year_data_path, output_path, exclude_forks=not include_forks, year=year)
+        else:
+            console.print(f"[yellow]Warning: No data found for {year}[/yellow]")
 
 
 @main.command()
 @click.option("--data", default="data/processed", help="Processed data directory")
-def analyze(data: str):
+@click.option("--years", default="2025", help="Year(s) to analyze (comma-separated)")
+def analyze(data: str, years: str):
     """Analyze productivity metrics."""
     import pandas as pd
 
     data_path = Path(data)
 
-    commits_path = data_path / "commits.parquet"
-    prs_path = data_path / "prs.parquet"
-    repos_path = data_path / "repos.parquet"
+    year_list = [int(y.strip()) for y in years.split(",")]
+    console.print(f"\n[cyan]Analyzing productivity for years: {year_list}...[/cyan]\n")
 
-    if not commits_path.exists():
-        console.print(f"[red]Error: No processed data found. Run 'gh-productivity process' first.[/red]")
-        return
+    for year in year_list:
+        year_path = data_path / str(year)
+        commits_path = year_path / "commits.parquet"
+        prs_path = year_path / "prs.parquet"
+        repos_path = year_path / "repos.parquet"
 
-    commits_df = pd.read_parquet(commits_path)
-    prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
-    repos_df = pd.read_parquet(repos_path)
+        if not commits_path.exists():
+            console.print(f"[yellow]No data found for {year}[/yellow]")
+            continue
 
-    console.print("\n[cyan]Analyzing productivity...[/cyan]\n")
+        commits_df = pd.read_parquet(commits_path)
+        prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
+        repos_df = pd.read_parquet(repos_path)
 
-    metrics = calculate_metrics(commits_df, prs_df, repos_df)
+        console.print(f"\n[bold]--- {year} ---[/bold]")
+        metrics = calculate_metrics(commits_df, prs_df, repos_df, year=year)
 
-    console.print()
-    metrics.print_summary()
+        console.print()
+        metrics.print_summary()
 
-    # AI breakdown
-    ai_breakdown = calculate_ai_breakdown(commits_df)
-    console.print(f"\n[bold]AI Breakdown:[/bold]")
-    console.print(f"  Total AI commits: {ai_breakdown.get('total', 0)}")
+        # AI breakdown
+        ai_breakdown = calculate_ai_breakdown(commits_df)
+        console.print(f"\n[bold]AI Breakdown:[/bold]")
+        console.print(f"  Total AI commits: {ai_breakdown.get('total', 0)}")
 
-    if ai_breakdown.get("by_agent"):
-        console.print(f"  By agent:")
-        for agent, count in ai_breakdown["by_agent"].items():
-            console.print(f"    - {agent}: {count}")
+        if ai_breakdown.get("by_agent"):
+            console.print(f"  By agent:")
+            for agent, count in ai_breakdown["by_agent"].items():
+                console.print(f"    - {agent}: {count}")
 
 
 @main.command()
 @click.option("--data", default="data/processed", help="Processed data directory")
 @click.option("--output", default="plots", help="Output directory for plots")
-def visualize(data: str, output: str):
+@click.option("--years", default="2025", help="Year(s) to visualize (comma-separated)")
+def visualize(data: str, output: str, years: str):
     """Generate visualizations."""
     import pandas as pd
 
     data_path = Path(data)
     output_path = Path(output)
 
-    commits_path = data_path / "commits.parquet"
-    prs_path = data_path / "prs.parquet"
-    repos_path = data_path / "repos.parquet"
+    year_list = [int(y.strip()) for y in years.split(",")]
+    console.print(f"\n[cyan]Generating visualizations for years: {year_list}...[/cyan]\n")
 
-    if not commits_path.exists():
-        console.print(f"[red]Error: No processed data found. Run 'gh-productivity process' first.[/red]")
-        return
+    for year in year_list:
+        year_path = data_path / str(year)
+        year_output_path = output_path / str(year)
+        commits_path = year_path / "commits.parquet"
+        prs_path = year_path / "prs.parquet"
+        repos_path = year_path / "repos.parquet"
 
-    commits_df = pd.read_parquet(commits_path)
-    prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
-    repos_df = pd.read_parquet(repos_path)
+        if not commits_path.exists():
+            console.print(f"[yellow]No data found for {year}[/yellow]")
+            continue
 
-    generate_all_visualizations(commits_df, prs_df, repos_df, output_path)
+        commits_df = pd.read_parquet(commits_path)
+        prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
+        repos_df = pd.read_parquet(repos_path)
+
+        generate_all_visualizations(commits_df, prs_df, repos_df, year_output_path)
 
 
 @main.command()
-@click.option("--year", default=2025, help="Year to analyze")
+@click.option("--years", default="2025", help="Year(s) to analyze (comma-separated)")
 @click.option("--repos", default="repos.json", help="Path to repos.json file")
 @click.option("--author", help="Filter by author")
-def run(year: int, repos: str, author: str | None):
+@click.option("--include-forks", is_flag=True, help="Include forked repos in analysis")
+def run(years: str, repos: str, author: str | None, include_forks: bool):
     """Run full pipeline: collect, process, analyze, visualize."""
+    import pandas as pd
+    from .benchmarks import calculate_benchmarks, print_benchmark_comparison
+    from .analyze import calculate_yoy_growth
+
     repos_path = Path(repos)
     raw_dir = Path("data/raw")
     processed_dir = Path("data/processed")
     plots_dir = Path("plots")
 
-    console.print(f"\n[bold cyan]GitHub Productivity Analysis {year}[/bold cyan]\n")
+    year_list = [int(y.strip()) for y in years.split(",")]
+    console.print(f"\n[bold cyan]GitHub Productivity Analysis {year_list}[/bold cyan]\n")
 
     # Step 1: Collect
-    if not raw_dir.exists() or not list(raw_dir.glob("*.json")):
-        console.print("[cyan]Step 1: Collecting data...[/cyan]")
-        collect_repos(repos_path, year, raw_dir, author)
-    else:
-        console.print("[yellow]Step 1: Skipping collection (data already exists)[/yellow]")
+    console.print("[cyan]Step 1: Collecting data...[/cyan]")
+    for year in year_list:
+        year_raw_dir = raw_dir / str(year)
+        if not year_raw_dir.exists() or not list(year_raw_dir.glob("*.json")):
+            collect_repos(repos_path, year, raw_dir, author, exclude_forks=not include_forks)
 
     # Step 2: Process
     console.print("\n[cyan]Step 2: Processing data...[/cyan]")
     from . import process as proc_module
-    dfs = proc_module.aggregate_data(raw_dir, processed_dir)
+    for year in year_list:
+        year_raw_dir = raw_dir / str(year)
+        if year_raw_dir.exists():
+            proc_module.aggregate_data(year_raw_dir, processed_dir, exclude_forks=not include_forks, year=year)
 
-    # Step 3: Analyze
+    # Step 3: Analyze (collect metrics for all years)
     console.print("\n[cyan]Step 3: Analyzing...[/cyan]")
-    metrics = calculate_metrics(dfs["commits"], dfs["prs"], dfs["repos"])
-    console.print()
-    metrics.print_summary()
+    yearly_metrics = {}
+    for year in year_list:
+        year_path = processed_dir / str(year)
+        commits_path = year_path / "commits.parquet"
+        if commits_path.exists():
+            commits_df = pd.read_parquet(commits_path)
+            prs_path = year_path / "prs.parquet"
+            prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
+            repos_df = pd.read_parquet(year_path / "repos.parquet")
+
+            # Load LOC data if available
+            loc_path = year_path / "loc.parquet"
+            loc_df = pd.read_parquet(loc_path) if loc_path.exists() else None
+
+            console.print(f"\n[bold]--- {year} ---[/bold]")
+            metrics = calculate_metrics(commits_df, prs_df, repos_df, year=year, loc_df=loc_df)
+            yearly_metrics[year] = metrics
+            console.print()
+            metrics.print_summary()
+
+    # Calculate YoY growth if multiple years
+    if len(yearly_metrics) > 1:
+        console.print("\n[bold]Year-over-Year Growth:[/bold]")
+        sorted_years = sorted(yearly_metrics.keys())
+        for i in range(1, len(sorted_years)):
+            curr_year = sorted_years[i]
+            prev_year = sorted_years[i - 1]
+            growth = calculate_yoy_growth(yearly_metrics[curr_year], yearly_metrics[prev_year])
+            console.print(f"  {prev_year} -> {curr_year}:")
+            console.print(f"    Commits: {growth['commits']:+.1%}")
+            console.print(f"    LOC: {growth['loc']:+.1%}")
+
+    # Calculate benchmarks for most recent year
+    latest_year = max(year_list)
+    if latest_year in yearly_metrics:
+        latest_path = processed_dir / str(latest_year) / "loc.parquet"
+        loc_df = pd.read_parquet(latest_path) if latest_path.exists() else None
+        benchmark = calculate_benchmarks(yearly_metrics[latest_year], loc_df)
+        print_benchmark_comparison(benchmark)
 
     # Step 4: Visualize
     console.print("\n[cyan]Step 4: Generating visualizations...[/cyan]")
-    generate_all_visualizations(dfs["commits"], dfs["prs"], dfs["repos"], plots_dir)
+    for year in year_list:
+        year_path = processed_dir / str(year)
+        year_plots_dir = plots_dir / str(year)
+        commits_path = year_path / "commits.parquet"
+        if commits_path.exists():
+            commits_df = pd.read_parquet(commits_path)
+            prs_path = year_path / "prs.parquet"
+            prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
+            repos_df = pd.read_parquet(year_path / "repos.parquet")
+
+            # Load LOC data for trend analysis
+            loc_path = year_path / "loc.parquet"
+            loc_df = pd.read_parquet(loc_path) if loc_path.exists() else None
+
+            # Prepare yearly LOC data
+            yearly_loc_data = {}
+            for y in year_list:
+                y_loc_path = processed_dir / str(y) / "loc.parquet"
+                if y_loc_path.exists():
+                    yearly_loc_data[y] = pd.read_parquet(y_loc_path)
+
+            generate_all_visualizations(
+                commits_df,
+                prs_df,
+                repos_df,
+                year_plots_dir,
+                yearly_metrics=yearly_metrics if len(yearly_metrics) > 1 else None,
+                benchmark=benchmark if year == latest_year else None,
+                yearly_loc_data=yearly_loc_data if yearly_loc_data else None,
+            )
 
     console.print(f"\n[bold green]✓ Analysis complete![/bold green]")
     console.print(f"  Plots: {plots_dir.absolute()}")
