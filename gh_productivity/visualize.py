@@ -6,6 +6,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -453,6 +454,119 @@ def plot_percentile_radar(
 from .benchmarks import AVERAGE_DEVELOPER
 
 
+def plot_temporal_heatmap(commits_df: pd.DataFrame, output_path: Path):
+    """Plot hour x day of week heatmap."""
+    if commits_df.empty:
+        return
+
+    df = commits_df.copy()
+    df["hour"] = df["date"].dt.hour
+    df["day_of_week"] = df["date"].dt.dayofweek
+
+    # Build heatmap matrix
+    heatmap = np.zeros((7, 24), dtype=int)
+    for _, row in df.iterrows():
+        heatmap[row["day_of_week"], row["hour"]] += 1
+
+    # Day labels
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap,
+        x=list(range(24)),
+        y=day_labels,
+        colorscale="Viridis",
+        colorbar=dict(title="Commits"),
+        hovertemplate="Hour: %{x}:00<br>Day: %{y}<br>Commits: %{z}<extra></extra>",
+    ))
+
+    fig.update_layout(
+        title="Commit Activity Heatmap (Hour x Day)",
+        xaxis_title="Hour of Day",
+        yaxis_title="Day of Week",
+        template="plotly_dark",
+        height=400,
+    )
+
+    fig.write_html(output_path / "temporal_heatmap.html")
+    console.print(f"[green]✓[/green] Saved temporal heatmap")
+
+
+def plot_hourly_distribution(commits_df: pd.DataFrame, output_path: Path):
+    """Plot hourly commit distribution bar chart."""
+    if commits_df.empty:
+        return
+
+    df = commits_df.copy()
+    df["hour"] = df["date"].dt.hour
+    hourly_counts = df.groupby("hour").size().reindex(range(24), fill_value=0)
+
+    fig = go.Figure(data=go.Bar(
+        x=list(range(24)),
+        y=hourly_counts.values,
+        marker=dict(
+            color=hourly_counts.values,
+            colorscale="Viridis",
+        ),
+        hovertemplate="Hour: %{x}:00<br>Commits: %{y}<extra></extra>",
+    ))
+
+    fig.update_layout(
+        title="Hourly Commit Distribution",
+        xaxis_title="Hour of Day",
+        yaxis_title="Commits",
+        template="plotly_dark",
+        height=400,
+    )
+
+    fig.write_html(output_path / "hourly_distribution.html")
+    console.print(f"[green]✓[/green] Saved hourly distribution")
+
+
+def plot_session_timeline(
+    commits_df: pd.DataFrame,
+    output_path: Path,
+    gap_minutes: int = 30,
+):
+    """Plot coding sessions timeline."""
+    if commits_df.empty:
+        return
+
+    from .temporal import detect_sessions
+
+    sessions = detect_sessions(commits_df, gap_minutes)
+    if not sessions:
+        console.print("[yellow]No sessions detected[/yellow]")
+        return
+
+    # Take top 50 sessions by duration
+    top_sessions = sorted(sessions, key=lambda x: x["duration"], reverse=True)[:50]
+
+    fig = go.Figure()
+
+    for i, session in enumerate(top_sessions):
+        fig.add_trace(go.Bar(
+            x=[session["duration"]],
+            y=[i],
+            orientation="h",
+            name=f"{session['commits']} commits",
+            hovertemplate=f"Start: {session['start']}<br>Duration: {session['duration']:.0f} min<br>Commits: {session['commits']}<extra></extra>",
+            marker=dict(color="#00d4aa"),
+        ))
+
+    fig.update_layout(
+        title=f"Coding Sessions (Top 50, max gap: {gap_minutes}min)",
+        xaxis_title="Session Duration (minutes)",
+        yaxis_title="Session",
+        template="plotly_dark",
+        height=800,
+        showlegend=False,
+    )
+
+    fig.write_html(output_path / "session_timeline.html")
+    console.print(f"[green]✓[/green] Saved session timeline")
+
+
 def generate_all_visualizations(
     commits_df: pd.DataFrame,
     prs_df: pd.DataFrame,
@@ -461,6 +575,7 @@ def generate_all_visualizations(
     yearly_metrics: dict | None = None,
     benchmark = None,
     yearly_loc_data: dict | None = None,
+    include_temporal: bool = False,
 ):
     """Generate all visualizations.
 
@@ -472,6 +587,7 @@ def generate_all_visualizations(
         yearly_metrics: Optional dict mapping year -> ProductivityMetrics
         benchmark: Optional BenchmarkResult for comparison charts
         yearly_loc_data: Optional dict mapping year -> LOC DataFrame
+        include_temporal: Include temporal pattern visualizations
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -500,5 +616,11 @@ def generate_all_visualizations(
 
     if yearly_loc_data:
         plot_loc_by_language_trend(yearly_loc_data, output_dir)
+
+    # Temporal visualizations (conditional)
+    if include_temporal:
+        plot_temporal_heatmap(commits_df, output_dir)
+        plot_hourly_distribution(commits_df, output_dir)
+        plot_session_timeline(commits_df, output_dir)
 
     console.print(f"\n[green]✓ All visualizations saved to {output_dir}[/green]")

@@ -10,8 +10,49 @@ from .collect import collect_repos
 from .process import aggregate_data
 from .analyze import calculate_metrics, calculate_ai_breakdown, calculate_repo_productivity
 from .visualize import generate_all_visualizations
+from .temporal import analyze_time_patterns
 
 console = Console()
+
+
+def print_temporal_summary(temporal_metrics):
+    """Print temporal metrics summary."""
+    from rich.table import Table
+
+    table = Table(title="Temporal Patterns")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    # Peak hours
+    peak_str = ", ".join([f"{h}h ({c})" for h, c in temporal_metrics.peak_hours[:3]])
+    table.add_row("Peak Hours", peak_str or "N/A")
+
+    # Chronotype
+    table.add_row("Chronotype", temporal_metrics.chronotype.capitalize())
+
+    # Work/Life
+    table.add_row("Weekend Activity", f"{temporal_metrics.weekend_commit_ratio:.1%}")
+    table.add_row("After-Hours (Weekdays)", f"{temporal_metrics.after_hours_percentage:.1%}")
+    table.add_row("Work/Life", temporal_metrics.work_life_interpretation)
+
+    # Sessions
+    table.add_row("Total Sessions", str(temporal_metrics.session_count))
+    if temporal_metrics.session_count > 0:
+        table.add_row("Avg Session Duration", f"{temporal_metrics.avg_session_duration_minutes:.0f} min")
+        table.add_row("Commits per Session", f"{temporal_metrics.commits_per_session:.1f}")
+
+    # Streaks
+    table.add_row("Current Streak", f"{temporal_metrics.current_streak} days")
+    table.add_row("Longest Streak", f"{temporal_metrics.longest_streak} days")
+    if temporal_metrics.longest_streak > 1 and temporal_metrics.longest_streak_dates[0]:
+        table.add_row(
+            "Longest Streak Dates",
+            f"{temporal_metrics.longest_streak_dates[0]} to {temporal_metrics.longest_streak_dates[1]}"
+        )
+    if temporal_metrics.avg_gap_between_streaks > 0:
+        table.add_row("Avg Gap Between Streaks", f"{temporal_metrics.avg_gap_between_streaks:.1f} days")
+
+    console.print(table)
 
 
 @click.group()
@@ -73,7 +114,8 @@ def process(data: str, output: str, years: str, include_forks: bool):
 @main.command()
 @click.option("--data", default="data/processed", help="Processed data directory")
 @click.option("--years", default="2025", help="Year(s) to analyze (comma-separated)")
-def analyze(data: str, years: str):
+@click.option("--temporal", is_flag=True, help="Include temporal analysis")
+def analyze(data: str, years: str, temporal: bool):
     """Analyze productivity metrics."""
     import pandas as pd
 
@@ -112,12 +154,19 @@ def analyze(data: str, years: str):
             for agent, count in ai_breakdown["by_agent"].items():
                 console.print(f"    - {agent}: {count}")
 
+        # Temporal analysis
+        if temporal:
+            console.print(f"\n[bold]Temporal Patterns:[/bold]")
+            temporal_metrics = analyze_time_patterns(commits_df)
+            print_temporal_summary(temporal_metrics)
+
 
 @main.command()
 @click.option("--data", default="data/processed", help="Processed data directory")
 @click.option("--output", default="plots", help="Output directory for plots")
 @click.option("--years", default="2025", help="Year(s) to visualize (comma-separated)")
-def visualize(data: str, output: str, years: str):
+@click.option("--temporal", is_flag=True, help="Include temporal visualizations")
+def visualize(data: str, output: str, years: str, temporal: bool):
     """Generate visualizations."""
     import pandas as pd
 
@@ -142,7 +191,13 @@ def visualize(data: str, output: str, years: str):
         prs_df = pd.read_parquet(prs_path) if prs_path.exists() else pd.DataFrame()
         repos_df = pd.read_parquet(repos_path)
 
-        generate_all_visualizations(commits_df, prs_df, repos_df, year_output_path)
+        generate_all_visualizations(
+            commits_df,
+            prs_df,
+            repos_df,
+            year_output_path,
+            include_temporal=temporal,
+        )
 
 
 @main.command()
