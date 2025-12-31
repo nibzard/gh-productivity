@@ -30,8 +30,6 @@ data/raw/
 data/processed/
 *.parquet
 
-# Plots
-plots/
 
 # IDE
 .vscode/
